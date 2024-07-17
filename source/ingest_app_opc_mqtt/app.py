@@ -15,6 +15,7 @@ OMNI_HOST = os.environ.get("OMNI_HOST", "localhost")
 OMNI_USER = os.environ.get("OMNI_USER", "$omni-api-token")
 OMNI_USER = getUserNameFromToken(os.environ.get("OMNI_PASS"))
 
+
 MQTT_HOST = os.environ.get("MQTT_HOST", "localhost")
 MQTT_TOPIC = os.environ.get("MQTT_TOPIC", "azure-iot-operations/data/")
 MQTT_USER = os.environ.get("MQTT_USER", "")
@@ -58,30 +59,49 @@ def ensure_prim_exists(stage, path, prim_type):
     return prim
 
 async def initialize_async(iot_topic):
-
+    original_usd = f"ConveyorBelt_A08_PR_NVD_01"
     iot_topic = sanitize_name(iot_topic)
-    stage_name = f"ConveyorBelt-{iot_topic}"
-    local_folder = f"file:{CONTENT_DIR}/{stage_name}"
+    stage_name = f"{iot_topic.split('/')[-1]}_ConveyorBelt"
+    # hardcoding local dir for now
+    local_folder = f"file:{CONTENT_DIR}/{original_usd}"
     stage_folder = f"{BASE_FOLDER}/{stage_name}"
     stage_url = f"{stage_folder}/{stage_name}.usd"
-    result = await omni.client.copy_async(
-        local_folder,
-        stage_folder,
-        behavior=omni.client.CopyBehavior.ERROR_IF_EXISTS,
-        message="Copy Conveyor Belt",
-    )
+    source_usd = f"{stage_folder}/{original_usd}.usd"
+    stage_url = source_usd.replace(f"{original_usd}.usd", stage_name+".usd")
+
+    dest_result, entry = omni.client.stat(stage_url)
+    if dest_result != omni.client.Result.OK:
+        print(f"Copying {local_folder} to {stage_folder}")
+        result = await omni.client.copy_async(
+            local_folder,
+            stage_folder,
+            behavior=omni.client.CopyBehavior.OVERWRITE,
+            message="Copy Conveyor Belt",
+        )
+        if(result != omni.client.Result.OK):
+            raise Exception(f"Failed to copy {local_folder} to {stage_folder}")
+
+        print(f" copying usd {source_usd} to {stage_url}")
+        await omni.client.copy_async(source_usd, stage_url, behavior=omni.client.CopyBehavior.OVERWRITE, message="Rename USD")
+        # remove old usd
+        await omni.client.delete_async(source_usd)
 
 
     print(f"Using stage URL: {stage_url}")
 
-    stage_result, entry = omni.client.stat(stage_url)
-    if stage_result == omni.client.Result.OK:
-        print("USD stage found.")
-        stage = Usd.Stage.Open(stage_url)
-    else:
-        print(f"USD stage at {stage_url} not found. Creating a new stage.")
-        stage = Usd.Stage.CreateNew(stage_url)
-        stage.Save()
+    try:
+
+        stage_result, entry = omni.client.stat(stage_url)
+        if stage_result == omni.client.Result.OK:
+            print("USD stage found.")
+            stage = Usd.Stage.Open(stage_url, load=Usd.Stage.LoadNone)
+        else:
+            print(f"USD stage at {stage_url} not found. Creating a new stage.")
+            stage = Usd.Stage.CreateNew(stage_url)
+            stage.Save()
+    except Exception as e:
+        print(f"Error opening USD stage: {e}")
+        raise
 
     live_session = LiveEditSession(stage_url)
     live_layer = await live_session.ensure_exists()
@@ -260,8 +280,8 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"An error occurred: {e}")
         traceback.print_exc()
+        # print('---- LOG MESSAGES ----')
+        # print(*messages, sep='\n')
+        # print('----')
     finally:
-        print('---- LOG MESSAGES ----')
-        print(*messages, sep='\n')
-        print('----')
         omni.client.shutdown()
