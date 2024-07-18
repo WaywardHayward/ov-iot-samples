@@ -32,31 +32,43 @@ CONTENT_DIR = Path(SCRIPT_DIR).resolve().parents[1].joinpath("content")
 
 messages = []
 
+
 def log_handler(thread, component, level, message):
     print(message)
     messages.append((thread, component, level, message))
 
-def sanitize_name(name):
-    name = name.strip().strip('/')
-    parts = name.split('/')
-    sanitized_parts = [re.sub(r'[^a-zA-Z0-9_]', '_', part) for part in parts]
-    sanitized_name = '/'.join(sanitized_parts)
-    sanitized_name = re.sub(r'/(\d)', r'/_\1', sanitized_name)
-    sanitized_name = sanitized_name.replace("-", "_")
 
+def sanitize_name(name):
+    # Strip leading/trailing whitespace and slashes, replace non-alphanumeric characters, and replace hyphens
+    sanitized_name = re.sub(r'[^a-zA-Z0-9/_-]', '_', name.strip().strip('/')).replace('-', '_')
+    # Ensure slashes are followed by underscores before digits
+    sanitized_name = re.sub(r'/(\d)', r'/_\1', sanitized_name)
+    # remove any empty levels e.g. /_/ or /_
+    sanitized_name = re.sub(r'/(_)+', '/', sanitized_name)
+    # Replace double slashes with single slashes
+    sanitized_name = sanitized_name.replace("//", "/")
+    # Raise an error if the sanitized name is empty
     if not sanitized_name:
         raise ValueError("Invalid name: " + name)
+
+    # Return the sanitized name in lowercase
     return sanitized_name.lower()
 
+
 def ensure_prim_exists(stage, path, prim_type):
+    # Ensure the path starts with a '/'x1
     if not path.startswith('/'):
         path = '/' + path
     print(f"Ensuring {path} exists")
+    # Try to get the prim at the specified path
     prim = stage.GetPrimAtPath(path)
+    # If the prim does not exist, create it with the specified type
     if not prim:
         print(f"Creating {path}")
         prim = stage.DefinePrim(path, prim_type)
+    # Return the prim (existing or newly created)
     return prim
+
 
 async def initialize_async(iot_topic):
     original_usd = f"ConveyorBelt_A08_PR_NVD_01"
@@ -86,7 +98,6 @@ async def initialize_async(iot_topic):
         # remove old usd
         await omni.client.delete_async(source_usd)
 
-
     print(f"Using stage URL: {stage_url}")
 
     try:
@@ -111,6 +122,7 @@ async def initialize_async(iot_topic):
 
     return stage, live_layer
 
+
 class OpcDeltaUsdWriter:
 
     def __init__(self, live_layer):
@@ -120,61 +132,63 @@ class OpcDeltaUsdWriter:
         print("Opening stage")
         self.stage = Usd.Stage.Open(self.live_layer)
 
-    def is_timestamp_recent(self, timestamp):
-        try:
-            timestamp_datetime = datetime.strptime(timestamp, '%Y-%m-%dT%H:%M:%S')
-            current_time = datetime.now()
-            time_difference = current_time - timestamp_datetime
-            return time_difference <= timedelta(minutes=10)
-        except Exception as e:
-            print(f"Error parsing the timestamp: {e}")
-            return True
-        finally:
-            print(f"Timestamp: {timestamp}")
-
     def write_to_opc_semantics(self, opc_topic, msg_content):
+        # Print the received message content
         print(f"Received message: {msg_content}")
+
         try:
+            # Attempt to parse the message content as JSON
             payload = json.loads(msg_content)
         except Exception as e:
+            # Print an error message if JSON parsing fails
             print(f"Error parsing the message content: {e}")
             return
 
+        # Check if the payload is missing
         if not payload:
             raise Exception("Payload is missing from the message.")
 
-        writer_name = payload.get("dataSetWriterName", "").replace(":", "_").replace(" ", "_")
+        # Extract and sanitize the DataSetWriterName from the payload
+        writer_name = payload.get("DataSetWriterName", "").replace(":", "_").replace(" ", "_")
         if not writer_name:
-            raise Exception("dataSetWriterName is missing from the payload.")
+            raise Exception("DataSetWriterName is missing from the payload.")
 
+        # Construct the base OPC path using the topic and writer name
         base_opc_path = f"iot/opc_delta/{opc_topic}/{writer_name}/"
 
-        if not self.is_timestamp_recent(payload["TimeStamp"]):
-            print(f"Timestamp is older than 10 minutes. Skipping the message.")
-            return
-
+        # Open the stage if it is not already open
         if not self.stage:
             self.open_stage()
 
-        for property_id, property_data in payload["payload"].items():
+        # Iterate over each property in the payload
+        for property_id, property_data in payload["Payload"].items():
+            # Sanitize and construct the semantic path for the property
             property_name = property_id.split(':')[-1].replace(';', '_').replace('.', '_')
             semantic_label = f"{property_name}"
             semantic_path = f"{base_opc_path}/{semantic_label}"
             semantic_path = sanitize_name(semantic_path)
 
+            # Ensure the prim exists at the semantic path, create if necessary
             prim = ensure_prim_exists(self.stage, semantic_path, "Scope")
 
+            # Iterate over each key-value pair in the property data
             for key, value in property_data.items():
+                # Get or create the attribute on the prim
                 item_attr = prim.GetAttribute(key)
                 if not item_attr:
                     item_attr = prim.CreateAttribute(key, Sdf.ValueTypeNames.String, True)
+                # Print the key-value pair being set
                 print(f"Setting {key} to {value}")
+                # Set the attribute value
                 item_attr.Set(str(value))
 
+        # Process live updates with the omni client
         omni.client.live_process()
+
 
 def connect_mqtt(stage, iot_topic, live_layer):
     opc_delta_usd_writer = OpcDeltaUsdWriter(live_layer)
+    opc_delta_usd_writer.open_stage()
     topic = MQTT_TOPIC
 
     def on_message(client, userdata, msg):
@@ -206,7 +220,7 @@ def connect_mqtt(stage, iot_topic, live_layer):
     if MQTT_USER:
         client_id = MQTT_USER
 
-    client = mqtt_client.Client(client_id)
+    client = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION1, client_id)
     client.enable_logger()
     client.on_connect = on_connect
     client.on_message = on_message
@@ -223,9 +237,21 @@ def connect_mqtt(stage, iot_topic, live_layer):
             print(f"Using MQTT_USER  without password {MQTT_USER}")
             client.username_pw_set(MQTT_USER)
 
-        if os.path.isfile(MQTT_CERT) and os.path.isfile(MQTT_KEY):
-            print(f"Using TLS certificate {MQTT_CERT} and key {MQTT_KEY}")
-            client.tls_set(certfile=MQTT_CERT, keyfile=MQTT_KEY)
+        if MQTT_CERT and MQTT_KEY:
+            # Ensure the paths use forward slashes
+            cert = MQTT_CERT
+            key = MQTT_KEY
+
+            cert = cert.replace('\\', '/')
+            key = key.replace('\\', '/')
+
+            if not os.path.isfile(cert):
+                print(f"Certificate file not found: {cert}")
+            if not os.path.isfile(key):
+                print(f"Key file not found: {key}")
+
+            print(f"Using TLS certificate {cert} and key {key}")
+            client.tls_set(certfile=cert, keyfile=key)
         else:
             print(f"TLS certificate or key not found. Using unencrypted connection. MQTT_CERT={MQTT_CERT} MQTT_KEY={MQTT_KEY}")
 
@@ -240,12 +266,18 @@ def connect_mqtt(stage, iot_topic, live_layer):
         client.loop_start()
     except Exception as e:
         print(f"Error connecting to MQTT broker: {e}")
+        print("Reconnecting...")
+        # wait a little bit before trying to reconnect
+        asyncio.sleep(30)
+        return connect_mqtt(stage, iot_topic, live_layer)
 
     return client
 
+
 def run(stage, live_layer, iot_topic):
     print(f"Connecting to {MQTT_HOST}....")
-    mqtt_client = connect_mqtt(stage, iot_topic, live_layer)
+    connect_mqtt(stage, iot_topic, live_layer)
+
 
 async def main(iot_topic):
     omni.client.initialize()
@@ -280,8 +312,8 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"An error occurred: {e}")
         traceback.print_exc()
-        # print('---- LOG MESSAGES ----')
-        # print(*messages, sep='\n')
-        # print('----')
+        print('---- LOG MESSAGES ----')
+        print(*messages, sep='\n')
+        print('----')
     finally:
         omni.client.shutdown()

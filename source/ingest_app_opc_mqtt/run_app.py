@@ -30,14 +30,12 @@ parser.add_argument("--password", "-p", default=default_password)
 parser.add_argument("--config", "-c", choices=["debug", "release"], default="release")
 parser.add_argument("--platform", default=CURRENT_PLATFORM)
 
-parser.add_argument("--mqtt-host", default="")
-parser.add_argument("--mqtt-port", default=1883)
-parser.add_argument("--mqtt-topic", default="")
-parser.add_argument("--mqtt-cert-file", default="")
-parser.add_argument("--mqtt-key-file", default="")
-
-parser.add_argument("--directory","-d", default="")
-parser.add_argument("--file", "-f", default="")
+parser.add_argument("--mqtt-host", "-mqh", default="")
+parser.add_argument("--mqtt-port", "-mqp", default=1883)
+parser.add_argument("--mqtt-topic", "-mqt", default="")
+parser.add_argument("--mqtt-cert-file", "-mqc", default="")
+parser.add_argument("--mqtt-key-file", "-mqk", default="")
+parser.add_argument("--mqtt-username", "-mqu", default="")
 
 
 args = parser.parse_args()
@@ -79,8 +77,9 @@ os.environ["OMNI_HOST"] = args.server
 os.environ["MQTT_HOST"] = args.mqtt_host
 os.environ["MQTT_PORT"] = str(args.mqtt_port)
 os.environ["MQTT_TOPIC"] = args.mqtt_topic
-os.environ["MQTT_CERT_FILE"] = args.mqtt_cert_file
-os.environ["MQTT_KEY_FILE"] = args.mqtt_key_file
+os.environ["MQTT_CERT"] = args.mqtt_cert_file
+os.environ["MQTT_KEY"] = args.mqtt_key_file
+os.environ["MQTT_USER"] = args.mqtt_username
 
 
 if PLATFORM_SYSTEM == "windows":
