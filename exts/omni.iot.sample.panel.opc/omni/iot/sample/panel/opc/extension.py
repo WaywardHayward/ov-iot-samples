@@ -213,7 +213,10 @@ class OmniIotSamplePanelExtension(omni.ext.IExt):
                 ui_button = ui.Button(f"{prop_name}\n{str(prop_value)}", style=uiButtonStyles.mainButton)
                 hStack.add_child(ui_button)
                 # if the prop is Value and the path ends with the speed path, update the cube and rollers
-                if prop_name == CONVEYOR_SPEED_PROP:
+                prop_path = prop.GetPath().pathString
+
+                if prop_name == CONVEYOR_SPEED_PROP and prop_path.endswith(CONVEYOR_SPEED_PATH):
+                    print(f"[{EXTENSION_NAME}] _update_frame speeed!: {prop_name} {prop_value}")
                     self._on_velocity_changed(prop_value)
                 x += 1
 
@@ -289,7 +292,7 @@ class OmniIotSamplePanelExtension(omni.ext.IExt):
                 sessionLayer.startTimeCode = 1
                 sessionLayer.endTimeCode = 192
                 self._iot_prim = self._stage.GetPrimAtPath("/iot")
-                self._cube = LiveRoller(self._stage, "/World/cube")
+                self._cube = LiveCube(self._stage, "/World/cube")
                 self._rollers = []
 
                 for x in range(38):
